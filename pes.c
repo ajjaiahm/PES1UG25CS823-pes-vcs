@@ -33,8 +33,6 @@ void cmd_init(void) {
 
     printf("Initialized empty PES repository in %s/\n", PES_DIR);
 }
-
-// Usage: pes add <file>...
 void cmd_add(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Usage: pes add <file>...\n");

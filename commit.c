@@ -73,31 +73,33 @@ int commit_parse(const void *data, size_t len, Commit *commit_out) {
 
 // Serialize a Commit struct to the text format.
 // Caller must free(*data_out).
-int commit_serialize(const Commit *commit, void **data_out, size_t *len_out) {
+int commit_serialize(const Commit *c, void **data_out, size_t *len_out) {
+    if (!c || !data_out || !len_out) return -1;
+
+    char *buffer = malloc(1024);
+    if (!buffer) return -1;
+
     char tree_hex[HASH_HEX_SIZE + 1];
-    char parent_hex[HASH_HEX_SIZE + 1];
-    hash_to_hex(&commit->tree, tree_hex);
+    hash_to_hex(&c->tree, tree_hex);
 
-    char buf[8192];
-    int n = 0;
-    n += snprintf(buf + n, sizeof(buf) - n, "tree %s\n", tree_hex);
-    if (commit->has_parent) {
-        hash_to_hex(&commit->parent, parent_hex);
-        n += snprintf(buf + n, sizeof(buf) - n, "parent %s\n", parent_hex);
+    int len = snprintf(buffer, 1024,
+        "tree %s\n"
+        "author %s\n"
+        "date %ld\n\n"
+        "%s\n",
+        tree_hex,
+        c->author,
+        c->timestamp,
+        c->message
+    );
+
+    if (len < 0) {
+        free(buffer);
+        return -1;
     }
-    n += snprintf(buf + n, sizeof(buf) - n,
-                  "author %s %" PRIu64 "\n"
-                  "committer %s %" PRIu64 "\n"
-                  "\n"
-                  "%s",
-                  commit->author, commit->timestamp,
-                  commit->author, commit->timestamp,
-                  commit->message);
 
-    *data_out = malloc(n + 1);
-    if (!*data_out) return -1;
-    memcpy(*data_out, buf, n + 1);
-    *len_out = (size_t)n;
+    *data_out = buffer;
+    *len_out = len;
     return 0;
 }
 
@@ -192,10 +194,56 @@ int head_update(const ObjectID *new_commit) {
 //   - object_write      : saves the serialized text as OBJ_COMMIT
 //   - head_update       : moves the branch pointer to your new commit
 //
-// Returns 0 on success, -1 on error.
-int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement commit creation
-    // (See Lab Appendix for logical steps)
-    (void)message; (void)commit_id_out;
-    return -1;
+int commit_create(const char *message, ObjectID *out) {
+    if (!message || !out) return -1;
+
+    Index index;
+    if (index_load(&index) != 0) {
+        printf("DEBUG: index_load failed\n");
+        return -1;
+    }
+
+    if (index.count == 0) {
+        printf("DEBUG: index empty\n");
+        return -1;
+    }
+
+    ObjectID tree_id;
+    if (tree_from_index(&tree_id) != 0) {
+        printf("DEBUG: tree_from_index failed\n");
+        return -1;
+    }
+
+    Commit commit;
+    memset(&commit, 0, sizeof(commit));
+
+    memcpy(&commit.tree, &tree_id, sizeof(ObjectID));
+
+    snprintf(commit.author, sizeof(commit.author), "student");
+    commit.timestamp = time(NULL);
+    snprintf(commit.message, sizeof(commit.message), "%s", message);
+
+    void *data = NULL;
+    size_t len = 0;
+
+    if (commit_serialize(&commit, &data, &len) != 0) {
+        printf("DEBUG: serialize failed\n");
+        return -1;
+    }
+
+    if (object_write(OBJ_COMMIT, data, len, out) != 0) {
+        printf("DEBUG: object_write failed\n");
+        free(data);
+        return -1;
+    }
+
+    free(data);
+
+    if (head_update(out) != 0) {
+        printf("DEBUG: head_update failed\n");
+        return -1;
+    }
+
+    printf("DEBUG: commit success\n");
+    return 0;
 }

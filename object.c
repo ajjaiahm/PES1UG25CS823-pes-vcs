@@ -94,50 +94,61 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    char header[64];
-    const char *type_str;
+    if (!id_out) return -1;
 
-    // 1. Determine type string
+    const char *type_str;
     if (type == OBJ_BLOB) type_str = "blob";
     else if (type == OBJ_TREE) type_str = "tree";
     else if (type == OBJ_COMMIT) type_str = "commit";
     else return -1;
 
-    // 2. Build header
-    int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
+    // 🔥 Safe header creation
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len);
+    if (header_len < 0 || header_len >= (int)sizeof(header)) {
+        return -1;
+    }
+    header[header_len++] = '\0';  // include null terminator
 
-    // 3. Allocate full buffer (header + data)
+    // 🔥 Allocate buffer safely
     size_t total_size = header_len + len;
     unsigned char *full = malloc(total_size);
     if (!full) return -1;
 
     memcpy(full, header, header_len);
-    memcpy(full + header_len, data, len);
 
-    // 4. Compute hash
+    // 🔥 Safe copy (NO NULL crash)
+    if (len > 0 && data != NULL) {
+        memcpy(full + header_len, data, len);
+    }
+
+    // 🔥 Compute hash
     compute_hash(full, total_size, id_out);
 
-    // 5. Check if object already exists
+    // 🔥 Deduplication
     if (object_exists(id_out)) {
         free(full);
         return 0;
     }
 
-    // 6. Build path
+    // 🔥 Build path
     char path[512];
     object_path(id_out, path, sizeof(path));
 
-    // Extract directory path (.pes/objects/XX)
+    // 🔥 Extract directory path
     char dir[512];
     strncpy(dir, path, sizeof(dir));
     char *slash = strrchr(dir, '/');
     if (slash) *slash = '\0';
 
+    // 🔥 Ensure directories exist
+    mkdir(".pes", 0755);
+    mkdir(".pes/objects", 0755);
     mkdir(dir, 0755);
 
-    // 7. Create temp file
+    // 🔥 Temp file path
     char temp_path[512];
-    snprintf(temp_path, sizeof(temp_path), "%.500s.tmp", path);
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
 
     int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) {
@@ -145,18 +156,18 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
         return -1;
     }
 
-    // 8. Write data
-    if (write(fd, full, total_size) != (ssize_t)total_size) {
+    // 🔥 Write safely
+    ssize_t written = write(fd, full, total_size);
+    if (written != (ssize_t)total_size) {
         close(fd);
         free(full);
         return -1;
     }
 
-    // 9. fsync file
     fsync(fd);
     close(fd);
 
-    // 10. Atomic rename
+    // 🔥 Atomic rename
     rename(temp_path, path);
 
     free(full);
